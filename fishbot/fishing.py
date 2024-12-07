@@ -12,6 +12,7 @@ class FishAgent:
         self.agent = agent
         self.audio_agent = audio_agent
         self.lure_template = cv.imread(asset)
+        self.template2 = cv.imread("assets/lure5.png")
         self.thread = None
 
     def cast_lure(self):
@@ -23,9 +24,16 @@ class FishAgent:
     def find_lure(self):
         try:
             print("Finding lure..")
-            lure_location = cv.matchTemplate(self.agent.image_bgr, self.lure_template, cv.TM_CCOEFF_NORMED)
-            min_val, max_val, min_loc, max_loc = cv.minMaxLoc(lure_location)
-            self.lure_location = max_loc
+            lure_location = cv.matchTemplate(self.agent.image, self.lure_template, cv.TM_CCOEFF_NORMED)
+            minval, maxval, minloc, maxloc = cv.minMaxLoc(lure_location)
+
+            print(f"match val: {maxval}")
+            if maxval < 0.7:
+                lure_location = cv.matchTemplate(self.agent.image, self.template2, cv.TM_CCOEFF_NORMED)
+                minval, maxval, minloc, maxloc = cv.minMaxLoc(lure_location)
+                print(f"match val new: {maxval}")
+
+            self.lure_location = maxloc
             self.move_to_lure()
         except Exception as e:
             print(f"Error: {e}")
@@ -43,7 +51,7 @@ class FishAgent:
                 )
                 self.watch_lure()
             else:
-                print("Warning: Attempted to move to lure_location, but lure_location is None.")
+                print("Warning: Attemlpted to move to lure_location, but lure_location is None.")
                 self.pull_lure()
         except Exception as e:
             print(f"Error: {e}")

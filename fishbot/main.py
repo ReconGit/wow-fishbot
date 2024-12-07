@@ -20,8 +20,7 @@ def main():
 
 class Agent:
     def __init__(self):
-        self.image_bgr: np.ndarray
-        self.image_hsv: np.ndarray
+        self.image: np.ndarray
         print("Agent initialized")
 
 
@@ -30,10 +29,8 @@ def capture_screen(agent: Agent):
         # t0 = time.time()
         image = ImageGrab.grab()
         image = np.array(image)
-        agent.image_bgr = cv.cvtColor(image, cv.COLOR_RGB2BGR)
-        agent.image_hsv = cv.cvtColor(image, cv.COLOR_RGB2HSV)  # was working with BGR
-        # agent.image_hsv = agent.image_bgr
-        # cv.imshow("screen capture", agent.image_hsv)
+        agent.image = cv.cvtColor(image, cv.COLOR_RGB2BGR)
+        # cv.imshow("screen capture", agent.image)
 
         key = cv.waitKey(1)
         if key == ord("q"):
