@@ -3,19 +3,19 @@ from threading import Thread
 
 import cv2 as cv
 import numpy as np
-from PIL import ImageGrab
-
 from audio import AudioAgent
 from fishing import FishAgent
+from PIL import ImageGrab
 
 
 def main():
     agent = Agent()
     audio_agent = AudioAgent()
+    fish_agent = FishAgent(agent, audio_agent, asset="assets/lure4.png")
     while True:
         print_menu()
         command = input("Command: ").upper()
-        handle_command(agent, audio_agent, command)
+        handle_command(agent, audio_agent, fish_agent, command)
 
 
 class Agent:
@@ -39,7 +39,7 @@ def capture_screen(agent: Agent):
         if key == ord("q"):
             break
 
-        time.sleep(0.0001)
+        time.sleep(0.001)
         # elapsed_time = time.time() - t0
         # print(f"FPS: {1 / elapsed_time:.2f}", end="\r")
 
@@ -50,9 +50,13 @@ def print_menu():
     print(" Q - Quit")
 
 
-def handle_command(agent: Agent, audio_agent: AudioAgent, command: str):
+def handle_command(
+    agent: Agent,
+    audio_agent: AudioAgent,
+    fish_agent: FishAgent,
+    command: str,
+):
     if command == "S":
-        # start screen capture thread
         capture_screen_t = Thread(
             target=capture_screen,
             args=(agent,),
@@ -60,7 +64,6 @@ def handle_command(agent: Agent, audio_agent: AudioAgent, command: str):
         )
         capture_screen_t.start()
 
-        # start audio capture thread
         audio_capture_t = Thread(
             target=audio_agent.capture_audio,
             args=(),
@@ -68,10 +71,14 @@ def handle_command(agent: Agent, audio_agent: AudioAgent, command: str):
         )
         audio_capture_t.start()
 
-        print("Starting in 3 seconds.")
+        print("Starting fishing in 3 seconds.")
         time.sleep(3)
-        fish_agent = FishAgent(agent, audio_agent, asset="assets/lure4.png")
-        fish_agent.run()
+        fishing_t = Thread(
+            target=fish_agent.cast_lure,
+            args=(),
+            daemon=True,
+        )
+        fishing_t.start()
 
     elif command == "Q":
         print("Quitting.")

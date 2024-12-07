@@ -1,11 +1,9 @@
 import random
 import time
-from threading import Thread
 
 import cv2 as cv
 import keyboard
 import pyautogui as py
-
 from audio import AudioAgent
 
 
@@ -65,17 +63,12 @@ class FishAgent:
                     print("No bite detected..")
                     break
 
-                # pixel = self.agent.image_hsv[self.lure_location[1] + 24][self.lure_location[0]]
-                # if pixel[0] > 90:
-                #     print("Bite detected!")
-                #     break
-
                 if self.audio_agent.audio_spike:
                     print("Bite detected!")
                     break
-
                 time.sleep(0.01)
             self.pull_lure()
+
         except Exception as e:
             print(f"Error: {e}")
             self.pull_lure()
@@ -85,20 +78,4 @@ class FishAgent:
         time.sleep(random.uniform(0.005, 0.01))
         py.rightClick()
         time.sleep(random.uniform(0.1, 0.2))
-        self.run()
-
-    def run(self):
-        if self.agent.image_bgr is None:
-            print("Image capture not found! Start screen capture first.")
-            return
-
-        print("Starting fishing thread in 0.5 seconds..")
-        time.sleep(random.uniform(0.1, 0.2))
-
-        self.fishing_thread = Thread(
-            target=self.cast_lure,
-            args=(),
-            name="fishing thread",
-            daemon=True,
-        )
-        self.fishing_thread.start()
+        self.cast_lure()
