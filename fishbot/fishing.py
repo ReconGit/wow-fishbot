@@ -8,30 +8,31 @@ from audio import AudioAgent
 
 
 class FishAgent:
-    def __init__(self, agent, audio_agent: AudioAgent, asset: str):
-        self.agent = agent
+    """Agent that cooperates with screen agent, audio agent and uses the information to control the game"""
+
+    def __init__(self, screen_agent, audio_agent: AudioAgent):
+        self.agent = screen_agent
         self.audio_agent = audio_agent
-        self.lure_template = cv.imread(asset)
-        self.template2 = cv.imread("assets/lure5.png")
-        self.thread = None
+        self.lure_template = cv.imread("assets/lure4.png")
+        self.template2 = cv.imread("assets/lure7.png")
 
     def cast_lure(self):
-        print("Casting lure..")
+        # print("Casting lure..")
         py.hotkey("ctrl", "6", interval=random.uniform(0.005, 0.01))
         time.sleep(random.uniform(2, 3))
         self.find_lure()
 
     def find_lure(self):
         try:
-            print("Finding lure..")
+            # print("Finding lure..")
             lure_location = cv.matchTemplate(self.agent.image, self.lure_template, cv.TM_CCOEFF_NORMED)
             minval, maxval, minloc, maxloc = cv.minMaxLoc(lure_location)
 
             print(f"match val: {maxval}")
-            if maxval < 0.7:
+            if maxval < 0.715:
                 lure_location = cv.matchTemplate(self.agent.image, self.template2, cv.TM_CCOEFF_NORMED)
                 minval, maxval, minloc, maxloc = cv.minMaxLoc(lure_location)
-                print(f"match val new: {maxval}")
+                print(f"new match val: {maxval}")
 
             self.lure_location = maxloc
             self.move_to_lure()
@@ -41,7 +42,7 @@ class FishAgent:
 
     def move_to_lure(self):
         try:
-            print("Moving to lure..")
+            # print("Moving to lure..")
             if self.lure_location:
                 py.moveTo(
                     x=self.lure_location[0] + 24,
@@ -51,7 +52,7 @@ class FishAgent:
                 )
                 self.watch_lure()
             else:
-                print("Warning: Attemlpted to move to lure_location, but lure_location is None.")
+                print("Warning: Attempted to move to lure_location, but lure_location is None.")
                 self.pull_lure()
         except Exception as e:
             print(f"Error: {e}")
@@ -82,8 +83,8 @@ class FishAgent:
             self.pull_lure()
 
     def pull_lure(self):
-        print("Pulling lure..")
+        # print("Pulling lure..")
         time.sleep(random.uniform(0.005, 0.01))
-        py.rightClick()
+        py.rightClick(interval=random.uniform(0.005, 0.01))
         time.sleep(random.uniform(0.1, 0.2))
         self.cast_lure()

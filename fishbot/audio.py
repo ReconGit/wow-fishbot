@@ -7,8 +7,9 @@ FORMAT = pyaudio.paInt16
 CHANNELS = 2
 SAMPLE_RATE = 44100
 CHUNK = 1024
-DEVICE_INDEX = 1
-THRESHOLD = 0.02
+
+DEVICE_INDEX = 2
+THRESHOLD = 0.04
 
 
 class AudioAgent:
@@ -35,7 +36,7 @@ class AudioAgent:
                 # print(f"RMS: {rms:.3f}        ", end="\r")  # RMS value normalized to [0, 1]
                 if rms > THRESHOLD:
                     self.audio_spike = True
-                    print("Audio spike detected!")
+                    # print("Audio spike detected!")
                     time.sleep(0.5)
                     self.audio_spike = False
                 time.sleep(0.01)

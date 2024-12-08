@@ -9,36 +9,40 @@ from PIL import ImageGrab
 
 
 def main():
-    agent = Agent()
-    audio_agent = AudioAgent()
-    fish_agent = FishAgent(agent, audio_agent, asset="assets/lure4.png")
-    while True:
-        print_menu()
-        command = input("Command: ").upper()
-        handle_command(agent, audio_agent, fish_agent, command)
+    try:
+        screen_agent = ScreenAgent()
+        audio_agent = AudioAgent()
+        fish_agent = FishAgent(screen_agent, audio_agent)
+        while True:
+            print_menu()
+            command = input("Command: ").upper()
+            handle_command(screen_agent, audio_agent, fish_agent, command)
+    except KeyboardInterrupt:
+        exit(0)
 
 
-class Agent:
+class ScreenAgent:
+    """Captures the screen and streams the screenshots to a variable"""
+
     def __init__(self):
         self.image: np.ndarray
         print("Agent initialized")
 
+    def capture_screen(self):
+        while True:
+            # t0 = time.time()
+            image = ImageGrab.grab()
+            image = np.array(image)
+            self.image = cv.cvtColor(image, cv.COLOR_RGB2BGR)
+            # cv.imshow("screen capture", agent.image)
 
-def capture_screen(agent: Agent):
-    while True:
-        # t0 = time.time()
-        image = ImageGrab.grab()
-        image = np.array(image)
-        agent.image = cv.cvtColor(image, cv.COLOR_RGB2BGR)
-        # cv.imshow("screen capture", agent.image)
+            key = cv.waitKey(1)
+            if key == ord("q"):
+                break
 
-        key = cv.waitKey(1)
-        if key == ord("q"):
-            break
-
-        time.sleep(0.001)
-        # elapsed_time = time.time() - t0
-        # print(f"FPS: {1 / elapsed_time:.2f}", end="\r")
+            time.sleep(0.001)
+            # elapsed_time = time.time() - t0
+            # print(f"FPS: {1 / elapsed_time:.2f}", end="\r")
 
 
 def print_menu():
@@ -48,15 +52,15 @@ def print_menu():
 
 
 def handle_command(
-    agent: Agent,
+    screen_agent: ScreenAgent,
     audio_agent: AudioAgent,
     fish_agent: FishAgent,
     command: str,
 ):
     if command == "S":
         capture_screen_t = Thread(
-            target=capture_screen,
-            args=(agent,),
+            target=screen_agent.capture_screen,
+            args=(screen_agent,),
             daemon=True,
         )
         capture_screen_t.start()
