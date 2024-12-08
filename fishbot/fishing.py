@@ -13,8 +13,8 @@ class FishAgent:
     def __init__(self, screen_agent, audio_agent: AudioAgent):
         self.agent = screen_agent
         self.audio_agent = audio_agent
-        self.lure_template = cv.imread("assets/lure4.png")
-        self.template2 = cv.imread("assets/lure7.png")
+        self.lure_template = cv.imread("assets/lure1.png")
+        self.template2 = cv.imread("assets/lure2.png")
 
     def cast_lure(self):
         # print("Casting lure..")
