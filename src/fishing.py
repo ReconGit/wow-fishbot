@@ -37,6 +37,7 @@ class FishAgent:
 
             self.lure_location = maxloc
             self.move_to_lure()
+
         except Exception as e:
             print(f"Error: {e}")
             self.pull_lure()
@@ -55,6 +56,7 @@ class FishAgent:
             else:
                 print("Warning: Attempted to move to lure_location, but lure_location is None.")
                 self.pull_lure()
+                
         except Exception as e:
             print(f"Error: {e}")
             self.pull_lure()
