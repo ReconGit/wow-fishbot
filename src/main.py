@@ -3,9 +3,10 @@ from threading import Thread
 
 import cv2 as cv
 import numpy as np
+from PIL import ImageGrab
+
 from audio import AudioAgent
 from fishing import FishAgent
-from PIL import ImageGrab
 
 
 def main():
