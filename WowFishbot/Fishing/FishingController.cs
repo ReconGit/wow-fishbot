@@ -9,6 +9,7 @@ internal sealed class FishingController
     private const double CalibratedCameraFovRadians = 1.75;
     private const double CameraFovOffsetRadians = 0.8;
     private const double CameraFovToleranceRadians = 0.03;
+    private const string MouseButtonHeldFailure = "mouse button held; manual catch required";
     private static readonly (int Key, string Name)[] MovementKeys =
     [
         (0x57, "W"), (0x41, "A"), (0x53, "S"), (0x44, "D"),
@@ -164,9 +165,12 @@ internal sealed class FishingController
             if (!WaitInterruptibly(observationDelay, out var waitFailure)) { Stop(waitFailure, catches); return; }
             var prehoverReady = TryPositionCursorOverBobber(window, viewport, render.ObjectAddress, render.ObjectGuid,
                 cameraManagerAddress, mouseoverAddress, out var prehoverX, out var prehoverY, out var moveMs, out var prehoverFailure);
+            var manualCatch = prehoverFailure == MouseButtonHeldFailure;
             Console.WriteLine(prehoverReady
                 ? $"CAST {castNumber}: PREHOVER_READY pixel=({prehoverX},{prehoverY}) move={moveMs}ms."
-                : $"CAST {castNumber}: PREHOVER_PENDING {prehoverFailure}.");
+                : manualCatch
+                    ? $"CAST {castNumber}: PREHOVER_SKIPPED {prehoverFailure}."
+                    : $"CAST {castNumber}: PREHOVER_PENDING {prehoverFailure}.");
 
             var biteClock = Stopwatch.StartNew();
             var bite = WaitForBite(render.ObjectAddress, render.InitialAnimation, out var biteFailure);
@@ -178,11 +182,30 @@ internal sealed class FishingController
                 var reactionDelay = NextDelay(_settings.ReactionDelayMs);
                 Console.WriteLine($"CAST {castNumber}: BITE reaction={reactionDelay}ms castAge={castClock.Elapsed.TotalSeconds:F3}s.");
                 if (!WaitInterruptibly(reactionDelay, out waitFailure)) { Stop(waitFailure, catches); return; }
-                if (TryCatchBobber(window, viewport, render, cameraManagerAddress, mouseoverAddress, out var pixelX, out var pixelY, out var catchFailure))
+                manualCatch |= MouseButtonHeld();
+                var caught = false;
+                var pixelX = 0;
+                var pixelY = 0;
+                var catchFailure = string.Empty;
+                if (!manualCatch)
+                    caught = TryCatchBobber(window, viewport, render, cameraManagerAddress, mouseoverAddress,
+                        out pixelX, out pixelY, out catchFailure);
+                manualCatch |= catchFailure == MouseButtonHeldFailure;
+                if (caught)
                 {
                     catches++;
                     safeForLure = true;
                     Console.WriteLine($"CATCH {catches}: bite={biteClock.Elapsed.TotalSeconds:F3}s pixel=({pixelX},{pixelY}).");
+                }
+                else if (manualCatch)
+                {
+                    Console.WriteLine($"MANUAL_CATCH: {MouseButtonHeldFailure}; waiting for bobber removal.");
+                    if (!WaitForBobberRemoval(player.Guid, render.ObjectGuid, out waitFailure))
+                    {
+                        Stop(waitFailure, catches);
+                        return;
+                    }
+                    safeForLure = true;
                 }
                 else Console.WriteLine($"CLICK_REJECTED: {catchFailure}.");
             }
@@ -388,6 +411,7 @@ internal sealed class FishingController
     {
         clientX = clientY = movementMs = 0;
         failure = string.Empty;
+        if (MouseButtonHeld()) { failure = MouseButtonHeldFailure; return false; }
         if (!_memory.TryReadSingle(objectAddress + ClientOffsets.BobberWorldY, out var worldY) ||
             !_memory.TryReadSingle(objectAddress + ClientOffsets.BobberWorldX, out var worldX) ||
             !_memory.TryReadSingle(objectAddress + ClientOffsets.BobberWorldZ, out var worldZ))
@@ -432,6 +456,7 @@ internal sealed class FishingController
         while (settle.ElapsedMilliseconds < 180)
         {
             if (StopReason() is { } stop) { failure = stop; return false; }
+            if (MouseButtonHeld()) { failure = MouseButtonHeldFailure; return false; }
             _memory.TryReadUInt64(mouseoverAddress, out mouseoverGuid);
             if (mouseoverGuid == bobberGuid) return true;
             Thread.Sleep(10);
@@ -455,6 +480,7 @@ internal sealed class FishingController
         while (clock.ElapsedMilliseconds < durationMs)
         {
             if (StopReason() is { } stop) { failure = stop; return false; }
+            if (MouseButtonHeld()) { failure = MouseButtonHeldFailure; return false; }
             if (!IsViewportCurrent(window, viewport)) { failure = "client viewport changed"; return false; }
             var t = Math.Clamp(clock.Elapsed.TotalMilliseconds / durationMs, 0, 1);
             var eased = t * t * (3 - 2 * t);
@@ -465,6 +491,7 @@ internal sealed class FishingController
             }
             Thread.Sleep(8);
         }
+        if (MouseButtonHeld()) { failure = MouseButtonHeldFailure; return false; }
         if (NativeMethods.SetCursorPos(targetX, targetY)) return true;
         failure = "final SetCursorPos failed";
         return false;
@@ -475,6 +502,7 @@ internal sealed class FishingController
     {
         failure = StopReason() ?? string.Empty;
         if (failure.Length != 0) return false;
+        if (MouseButtonHeld()) { failure = MouseButtonHeldFailure; return false; }
         if (!IsViewportCurrent(window, viewport)) { failure = "client viewport changed"; return false; }
         if (!_memory.TryReadUInt64(mouseoverAddress, out var guid) || guid != expectedGuid)
         {
@@ -484,6 +512,24 @@ internal sealed class FishingController
         NativeMethods.mouse_event(NativeMethods.RightButtonDown, 0, 0, 0, UIntPtr.Zero);
         try { Thread.Sleep(_settings.MouseButtonHoldMs); }
         finally { NativeMethods.mouse_event(NativeMethods.RightButtonUp, 0, 0, 0, UIntPtr.Zero); }
+        return true;
+    }
+
+    private bool WaitForBobberRemoval(ulong playerGuid, ulong bobberGuid, out string failure)
+    {
+        failure = string.Empty;
+        var clock = Stopwatch.StartNew();
+        while (clock.ElapsedMilliseconds < 10000)
+        {
+            if (StopReason() is { } stop) { failure = stop; return false; }
+            if (_memory.FindOwnedFishingBobbers(playerGuid).All(item => item.ObjectGuid != bobberGuid))
+            {
+                Console.WriteLine($"MANUAL_CATCH_DONE: bobber removed after {clock.ElapsedMilliseconds}ms.");
+                return true;
+            }
+            Thread.Sleep(25);
+        }
+        Console.WriteLine("MANUAL_CATCH_TIMEOUT: bobber remained for 10000ms; resuming.");
         return true;
     }
 
@@ -551,6 +597,7 @@ internal sealed class FishingController
     private int NextDelay(DelayRange range) => Random.Shared.Next(range.Min, checked(range.Max + 1));
     private bool IsExitPressed() => IsKeyDown(_settings.ExitVirtualKey);
     private static bool IsKeyDown(int key) => (NativeMethods.GetAsyncKeyState(key) & 0x8000) != 0;
+    private static bool MouseButtonHeld() => IsKeyDown(0x01) || IsKeyDown(0x02);
 
     private static string? PressedMovementKey()
     {
