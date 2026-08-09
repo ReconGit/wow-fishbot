@@ -5,7 +5,7 @@
 - Windows
 - .NET 9 or newer SDK
 - WoW 3.3.5a build 12340
-- 16:9 client viewport
+- 16:9 or ultrawide client viewport
 - Fishing: backtick
 - Lure: Shift+backtick
 

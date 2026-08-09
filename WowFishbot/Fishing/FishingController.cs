@@ -575,8 +575,10 @@ internal sealed class FishingController
         var height = rect.Bottom - rect.Top;
         if (width < 640 || height < 360) throw new InvalidOperationException($"Client viewport {width}x{height} is too small.");
         var aspect = width / (double)height;
-        if (Math.Abs(aspect - 16.0 / 9.0) > _settings.AspectRatioTolerance)
-            throw new InvalidOperationException($"Viewport {width}x{height} is not a supported 16:9 resolution.");
+        var supportedAspect = Math.Abs(aspect - 16.0 / 9.0) <= _settings.AspectRatioTolerance ||
+                              Math.Abs(aspect - 43.0 / 18.0) <= _settings.AspectRatioTolerance;
+        if (!supportedAspect)
+            throw new InvalidOperationException($"Viewport {width}x{height} is not a supported 16:9 or ultrawide resolution.");
         return new ClientViewport(origin, width, height);
     }
 
