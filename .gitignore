@@ -51,6 +51,10 @@ CodeCoverage/
 [Tt]est[Rr]esult*/
 [Bb]uild[Ll]og.*
 
+# Fishbot runtime output
+fishing-controller*.txt
+.dotnet_home/
+
 # NUnit
 *.VisualState.xml
 TestResult.xml
