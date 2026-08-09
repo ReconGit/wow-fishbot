@@ -24,6 +24,7 @@ internal sealed class FishingSettings
     public int LureModifierVirtualKey { get; init; } = 0x10;
     public int LureReapplyBeforeExpiryMs { get; init; } = 5000;
     public int LureDurationStalenessMarginMs { get; init; } = 21000;
+    public int LureCastStartTimeoutMs { get; init; } = 200;
     public int LureApplyTimeoutMs { get; init; } = 8000;
     public DelayRange LurePreApplyDelayMs { get; init; } = new(150, 200);
     public DelayRange LurePostApplyDelayMs { get; init; } = new(150, 200);
@@ -65,7 +66,8 @@ internal sealed class FishingSettings
         if (KeyHoldMs is < 20 or > 500 || MouseButtonHoldMs is < 20 or > 500)
             throw new InvalidOperationException($"Input hold durations in '{path}' must be 20 through 500 ms.");
         if (LureModifierVirtualKey is < 1 or > 254 || LureModifierVirtualKey == StartVirtualKey || LureModifierVirtualKey == ExitVirtualKey ||
-            LureReapplyBeforeExpiryMs is < 0 or > 60000 || LureDurationStalenessMarginMs is < 0 or > 60000 || LureApplyTimeoutMs is < 1000 or > 30000)
+            LureReapplyBeforeExpiryMs is < 0 or > 60000 || LureDurationStalenessMarginMs is < 0 or > 60000 ||
+            LureCastStartTimeoutMs is < 100 or > 2000 || LureApplyTimeoutMs is < 1000 or > 30000)
             throw new InvalidOperationException($"Invalid lure setting in '{path}'.");
         if (LogMaxBytes is < 65536 or > 100 * 1024 * 1024 || LogArchiveCount is < 0 or > 20)
             throw new InvalidOperationException($"Invalid log limit in '{path}'.");

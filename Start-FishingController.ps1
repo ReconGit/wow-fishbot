@@ -10,6 +10,31 @@ $env:DOTNET_CLI_HOME = Join-Path $PSScriptRoot '.dotnet_home'
 $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 
+function Write-NewLogContent {
+    param(
+        [string]$Path,
+        [long]$Position
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return $Position }
+    $length = (Get-Item -LiteralPath $Path).Length
+    if ($length -lt $Position) { $Position = 0L }
+    $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+    $stream = [System.IO.FileStream]::new($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $share)
+    try {
+        $null = $stream.Seek($Position, 'Begin')
+        $reader = [System.IO.StreamReader]::new($stream)
+        try {
+            $text = $reader.ReadToEnd()
+            $nextPosition = $stream.Position
+            if ($text) { Write-Host -NoNewline $text }
+        }
+        finally { $reader.Dispose() }
+    }
+    finally { $stream.Dispose() }
+    return $nextPosition
+}
+
 $configuration = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
 if (-not (Get-Process -Name $configuration.ProcessName -ErrorAction SilentlyContinue)) {
     throw "Game client process '$($configuration.ProcessName)' is not running."
@@ -42,23 +67,10 @@ try {
 
         $position = 0L
         while (-not $controller.HasExited) {
-            $length = (Get-Item -LiteralPath $OutputPath).Length
-            if ($length -lt $position) { $position = 0L }
-            $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
-            $stream = [System.IO.FileStream]::new($OutputPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $share)
-            try {
-                $null = $stream.Seek($position, 'Begin')
-                $reader = [System.IO.StreamReader]::new($stream)
-                try {
-                    $text = $reader.ReadToEnd()
-                    $position = $stream.Position
-                    if ($text) { Write-Host -NoNewline $text }
-                }
-                finally { $reader.Dispose() }
-            }
-            finally { $stream.Dispose() }
+            $position = Write-NewLogContent -Path $OutputPath -Position $position
             Start-Sleep -Milliseconds 100
         }
+        $position = Write-NewLogContent -Path $OutputPath -Position $position
     }
     $controller.Refresh()
     if ($controller.ExitCode -ne 0) {

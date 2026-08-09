@@ -317,6 +317,29 @@ internal sealed class FishingController
             NativeMethods.keybd_event((byte)_settings.LureModifierVirtualKey, 0, NativeMethods.KeyUp, UIntPtr.Zero);
         }
 
+        var castStartClock = Stopwatch.StartNew();
+        uint castingSpellId = 0;
+        var castingStateReadable = false;
+        while (castStartClock.ElapsedMilliseconds < _settings.LureCastStartTimeoutMs)
+        {
+            if (StopReason() is { } stop) { failure = stop; return LurePreparationResult.Interrupted; }
+            if (_memory.TryReadUInt32(playerAddress + ClientOffsets.UnitCastingSpellId, out castingSpellId))
+            {
+                castingStateReadable = true;
+                if (castingSpellId != 0) break;
+            }
+            Thread.Sleep(10);
+        }
+        if (castingStateReadable && castingSpellId == 0)
+        {
+            failure = $"lure cast did not start within {_settings.LureCastStartTimeoutMs}ms";
+            return LurePreparationResult.DisableForSession;
+        }
+        if (castingSpellId != 0)
+            Console.WriteLine($"LURE_CAST_STARTED: spell={castingSpellId} detection={castStartClock.ElapsedMilliseconds}ms.");
+        else
+            Console.WriteLine("LURE_CAST_STATE: unreadable; retaining enchant-confirmation fallback.");
+
         var clock = Stopwatch.StartNew();
         FishingLureState? confirmed = null;
         while (clock.ElapsedMilliseconds < _settings.LureApplyTimeoutMs)

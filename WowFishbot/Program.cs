@@ -10,6 +10,8 @@ internal static class Program
 {
     public static int Main(string[] args)
     {
+        var originalOutput = Console.Out;
+        RotatingTextWriter? output = null;
         try
         {
             CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
@@ -19,7 +21,7 @@ internal static class Program
             var settings = FishingSettings.Load();
             using var instance = FishingController.AcquireSingleInstance();
             if (options.EnableDebugPrivilege) NativeMethods.EnableDebugPrivilege();
-            using var output = !settings.EnableFileLogging || options.OutputPath is null
+            output = !settings.EnableFileLogging || options.OutputPath is null
                 ? null
                 : new RotatingTextWriter(Path.GetFullPath(options.OutputPath), settings.LogMaxBytes, settings.LogArchiveCount);
             if (output is not null) Console.SetOut(output);
@@ -30,8 +32,13 @@ internal static class Program
         catch (Exception ex)
         {
             Console.Error.WriteLine($"error: {ex.Message}");
-            Console.WriteLine($"error: {ex.Message}");
+            if (output is not null) output.WriteLine($"error: {ex.Message}");
             return 1;
+        }
+        finally
+        {
+            Console.SetOut(originalOutput);
+            output?.Dispose();
         }
     }
 }
