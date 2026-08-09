@@ -542,10 +542,11 @@ internal sealed class FishingController
         var depth = dy * matrix[0] + dx * matrix[1] + dz * matrix[2];
         var right = dy * matrix[3] + dx * matrix[4] + dz * matrix[5];
         var up = dy * matrix[6] + dx * matrix[7] + dz * matrix[8];
-        var centerX = width * (963.935465487425 / 1920.0);
+        var viewportScale = height / 1080.0;
+        var centerX = width / 2.0 + (963.935465487425 - 960.0) * viewportScale;
         var centerY = height * (501.6182034479883 / 1080.0);
         var fovScale = Math.Tan(CalibratedCameraFovRadians / 2.0) / Math.Tan(cameraFov / 2.0);
-        var horizontalScale = width * (964.8055111103448 / 1920.0) * fovScale;
+        var horizontalScale = 964.8055111103448 * viewportScale * fovScale;
         var verticalScale = height * (922.4937830093356 / 1080.0) * fovScale;
         return new ScreenProjection(centerX - horizontalScale * right / depth,
             centerY - verticalScale * up / depth, depth);
