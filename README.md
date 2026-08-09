@@ -3,7 +3,7 @@
 ## Requirements
 
 - Windows
-- .NET 9 SDK
+- .NET 9 or newer SDK
 - WoW 3.3.5a build 12340
 - 16:9 client viewport
 - Fishing: backtick
