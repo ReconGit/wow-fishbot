@@ -32,6 +32,7 @@ internal sealed class FishingSettings
     public int LogMaxBytes { get; init; } = 2 * 1024 * 1024;
     public int LogArchiveCount { get; init; } = 3;
     public double AspectRatioTolerance { get; init; } = 0.02;
+    public double FieldOfView { get; init; } = 95.0;
 
     public static FishingSettings Load()
     {
@@ -70,6 +71,8 @@ internal sealed class FishingSettings
             throw new InvalidOperationException($"Invalid log limit in '{path}'.");
         if (!double.IsFinite(AspectRatioTolerance) || AspectRatioTolerance is < 0 or > 0.25)
             throw new InvalidOperationException($"Invalid aspect-ratio tolerance in '{path}'.");
+        if (!double.IsFinite(FieldOfView) || FieldOfView is < 25 or > 150)
+            throw new InvalidOperationException($"FieldOfView in '{path}' must be between 25 and 150.");
     }
 
     private static void ValidateRange(DelayRange? range, string name, string path)

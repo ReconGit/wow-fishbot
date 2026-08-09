@@ -6,6 +6,9 @@ namespace WowFishbot.Fishing;
 
 internal sealed class FishingController
 {
+    private const double CalibratedCameraFovRadians = 1.75;
+    private const double CameraFovOffsetRadians = 0.8;
+    private const double CameraFovToleranceRadians = 0.03;
     private static readonly (int Key, string Name)[] MovementKeys =
     [
         (0x57, "W"), (0x41, "A"), (0x53, "S"), (0x44, "D"),
@@ -121,6 +124,7 @@ internal sealed class FishingController
         var mouseoverAddress = _memory.Info.ModuleBase + ClientOffsets.MouseoverGuidRva;
         var cameraManagerAddress = _memory.Info.ModuleBase + ClientOffsets.CameraManagerRva;
         var catches = 0;
+        var lureDisabledForSession = false;
         var castNumber = 1;
         var castClock = Stopwatch.StartNew();
 
@@ -188,10 +192,18 @@ internal sealed class FishingController
                 safeForLure = true;
             }
 
-            if (safeForLure && _settings.EnableLureReapplication && !PrepareLure(player.ObjectAddress, out var lureFailure))
+            if (safeForLure && _settings.EnableLureReapplication && !lureDisabledForSession)
             {
-                Stop(lureFailure, catches);
-                return;
+                switch (PrepareLure(player.ObjectAddress, out var lureFailure))
+                {
+                    case LurePreparationResult.Interrupted:
+                        Stop(lureFailure, catches);
+                        return;
+                    case LurePreparationResult.DisableForSession:
+                        lureDisabledForSession = true;
+                        Console.WriteLine($"LURE_DISABLED: {lureFailure}; continuing without further lure attempts until the next session.");
+                        break;
+                }
             }
 
             var recastDelay = NextDelay(_settings.RecastDelayMs);
@@ -277,22 +289,22 @@ internal sealed class FishingController
         return TryRightClickVerifiedBobber(window, viewport, mouseoverAddress, bobber.ObjectGuid, out failure);
     }
 
-    private bool PrepareLure(uint playerAddress, out string failure)
+    private LurePreparationResult PrepareLure(uint playerAddress, out string failure)
     {
         failure = string.Empty;
         var lure = TryReadLure(playerAddress);
         if (lure is null)
         {
             Console.WriteLine("LURE_STATE: unavailable; continuing without reapplication.");
-            return true;
+            return LurePreparationResult.Continue;
         }
 
         var requiredMs = checked(_settings.BiteTimeoutMs + _settings.LureReapplyBeforeExpiryMs + _settings.LureDurationStalenessMarginMs);
         Console.WriteLine($"LURE_STATE: item={lure.ItemEntry} enchant={lure.EnchantId} remaining={lure.DurationMs}ms required={requiredMs}ms.");
-        if (lure.EnchantId != 0 && lure.DurationMs > requiredMs) return true;
+        if (lure.EnchantId != 0 && lure.DurationMs > requiredMs) return LurePreparationResult.Continue;
 
         var preDelay = NextDelay(_settings.LurePreApplyDelayMs);
-        if (!WaitInterruptibly(preDelay, out failure)) return false;
+        if (!WaitInterruptibly(preDelay, out failure)) return LurePreparationResult.Interrupted;
         NativeMethods.keybd_event((byte)_settings.LureModifierVirtualKey, 0, 0, UIntPtr.Zero);
         try
         {
@@ -309,7 +321,7 @@ internal sealed class FishingController
         FishingLureState? confirmed = null;
         while (clock.ElapsedMilliseconds < _settings.LureApplyTimeoutMs)
         {
-            if (StopReason() is { } stop) { failure = stop; return false; }
+            if (StopReason() is { } stop) { failure = stop; return LurePreparationResult.Interrupted; }
             var current = TryReadLure(playerAddress);
             if (current is not null && current.EnchantId != 0 &&
                 (current.EnchantId != lure.EnchantId || current.DurationMs > lure.DurationMs + 30000))
@@ -322,11 +334,13 @@ internal sealed class FishingController
         if (confirmed is null)
         {
             failure = $"lure application was not confirmed within {_settings.LureApplyTimeoutMs}ms";
-            return false;
+            return LurePreparationResult.DisableForSession;
         }
 
         Console.WriteLine($"LURE_APPLIED: enchant={confirmed.EnchantId} duration={confirmed.DurationMs}ms confirmation={clock.ElapsedMilliseconds}ms.");
-        return WaitInterruptibly(NextDelay(_settings.LurePostApplyDelayMs), out failure);
+        return WaitInterruptibly(NextDelay(_settings.LurePostApplyDelayMs), out failure)
+            ? LurePreparationResult.Continue
+            : LurePreparationResult.Interrupted;
     }
 
     private FishingLureState? TryReadLure(uint playerAddress)
@@ -369,9 +383,17 @@ internal sealed class FishingController
         var cameraY = BitConverter.ToSingle(bytes, 0x08);
         var cameraX = BitConverter.ToSingle(bytes, 0x0C);
         var cameraZ = BitConverter.ToSingle(bytes, 0x10);
+        var cameraFov = BitConverter.ToSingle(bytes, 0x40);
+        var expectedCameraFov = CameraFovOffsetRadians + _settings.FieldOfView / 100.0;
+        if (!float.IsFinite(cameraFov) || Math.Abs(cameraFov - expectedCameraFov) > CameraFovToleranceRadians)
+        {
+            failure = $"configured FOV {_settings.FieldOfView:F1} predicts camera FOV {expectedCameraFov:F3}, but memory reports {cameraFov:F3}";
+            return false;
+        }
         var matrix = new float[9];
         for (var i = 0; i < matrix.Length; i++) matrix[i] = BitConverter.ToSingle(bytes, 0x14 + i * 4);
-        var projection = ProjectBobber(worldX, worldY, worldZ, cameraX, cameraY, cameraZ, matrix, viewport.Width, viewport.Height);
+        var projection = ProjectBobber(worldX, worldY, worldZ, cameraX, cameraY, cameraZ, matrix,
+            cameraFov, viewport.Width, viewport.Height);
         clientX = (int)Math.Round(projection.X);
         clientY = (int)Math.Round(projection.Y);
         if (projection.Depth <= 0 || clientX < 0 || clientX >= viewport.Width || clientY < 0 || clientY >= viewport.Height)
@@ -443,7 +465,7 @@ internal sealed class FishingController
     }
 
     private static ScreenProjection ProjectBobber(float worldX, float worldY, float worldZ,
-        float cameraX, float cameraY, float cameraZ, float[] matrix, int width, int height)
+        float cameraX, float cameraY, float cameraZ, float[] matrix, float cameraFov, int width, int height)
     {
         var dx = worldX - cameraX;
         var dy = worldY - cameraY;
@@ -453,8 +475,9 @@ internal sealed class FishingController
         var up = dy * matrix[6] + dx * matrix[7] + dz * matrix[8];
         var centerX = width * (963.935465487425 / 1920.0);
         var centerY = height * (501.6182034479883 / 1080.0);
-        var horizontalScale = width * (964.8055111103448 / 1920.0);
-        var verticalScale = height * (922.4937830093356 / 1080.0);
+        var fovScale = Math.Tan(CalibratedCameraFovRadians / 2.0) / Math.Tan(cameraFov / 2.0);
+        var horizontalScale = width * (964.8055111103448 / 1920.0) * fovScale;
+        var verticalScale = height * (922.4937830093356 / 1080.0) * fovScale;
         return new ScreenProjection(centerX - horizontalScale * right / depth,
             centerY - verticalScale * up / depth, depth);
     }
@@ -555,3 +578,4 @@ internal sealed record ClientViewport(Point Origin, int Width, int Height);
 internal sealed record RenderableBobber(uint ObjectAddress, ulong ObjectGuid, uint InitialAnimation);
 internal sealed record FishingLureState(uint ItemEntry, uint EnchantId, uint DurationMs);
 internal sealed record ScreenProjection(double X, double Y, double Depth);
+internal enum LurePreparationResult { Continue, DisableForSession, Interrupted }

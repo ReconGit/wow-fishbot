@@ -52,7 +52,7 @@ CodeCoverage/
 [Bb]uild[Ll]og.*
 
 # Fishbot runtime output
-fishing-controller*.txt
+fishing-controller*.txt*
 .dotnet_home/
 
 # NUnit

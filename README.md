@@ -31,7 +31,6 @@ dotnet restore .\WowFishbot\WowFishbot.csproj
 ## Configuration
 
 - `fishing-controller.json`
-- `EnableFileLogging`: `false`
 
 ## Access
 
