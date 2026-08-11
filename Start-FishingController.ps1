@@ -45,6 +45,14 @@ if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 
 $dotnetExe = (Get-Command dotnet -ErrorAction Stop).Source
 $fileLoggingEnabled = $configuration.EnableFileLogging -eq $true
+$previousLogState = if ($fileLoggingEnabled -and (Test-Path -LiteralPath $OutputPath)) {
+    $item = Get-Item -LiteralPath $OutputPath
+    [pscustomobject]@{
+        Length = $item.Length
+        LastWriteTimeUtcTicks = $item.LastWriteTimeUtc.Ticks
+    }
+}
+else { $null }
 $arguments = if ($fileLoggingEnabled) {
     '"{0}" --debug-privilege --parent-pid {1} --output "{2}"' -f $dllPath, $PID, $OutputPath
 }
@@ -60,8 +68,15 @@ try {
         while (-not $controller.HasExited) { Start-Sleep -Milliseconds 250 }
     }
     else {
-        while (-not (Test-Path -LiteralPath $OutputPath)) {
+        while ($true) {
             if ($controller.HasExited) { throw "Controller exited with code $($controller.ExitCode)." }
+            if (Test-Path -LiteralPath $OutputPath) {
+                $item = Get-Item -LiteralPath $OutputPath
+                $isFreshLog = $null -eq $previousLogState -or
+                    $item.Length -ne $previousLogState.Length -or
+                    $item.LastWriteTimeUtc.Ticks -ne $previousLogState.LastWriteTimeUtcTicks
+                if ($isFreshLog) { break }
+            }
             Start-Sleep -Milliseconds 100
         }
 
