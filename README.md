@@ -24,14 +24,17 @@ dotnet restore .\WowFishbot\WowFishbot.csproj
 
 - Backtick: start
 - W/A/S/D/Q/E, arrows, Space: idle
-- Alt+Tab: idle
-- Hold LMB/RMB: manual catch for the current bobber
+- Alt+Tab: continue with background input when enabled
+- Hold LMB/RMB while WoW is focused: manual catch for the current bobber
 - F8: exit
 - Close launcher window: exit
+
+Background catches briefly move and confine the host cursor at the bite, then restore it.
 
 ## Configuration
 
 - `fishing-controller.json`
+- `EnableBackgroundInput`: targeted background keyboard/click input
 
 ## Access
 

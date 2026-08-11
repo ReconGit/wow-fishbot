@@ -54,6 +54,7 @@ CodeCoverage/
 # Fishbot runtime output
 fishing-controller*.txt*
 .dotnet_home/
+.codex-build/
 
 # NUnit
 *.VisualState.xml

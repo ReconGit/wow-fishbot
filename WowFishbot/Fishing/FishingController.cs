@@ -9,7 +9,7 @@ internal sealed class FishingController
     private const double CalibratedCameraFovRadians = 1.75;
     private const double CameraFovOffsetRadians = 0.8;
     private const double CameraFovToleranceRadians = 0.03;
-    private const string MouseButtonHeldFailure = "mouse button held; manual catch required";
+    private const string MouseButtonHeldFailure = FishingInputController.MouseButtonHeldFailure;
     private static readonly (int Key, string Name)[] MovementKeys =
     [
         (0x57, "W"), (0x41, "A"), (0x53, "S"), (0x44, "D"),
@@ -19,6 +19,7 @@ internal sealed class FishingController
 
     private readonly ProcessMemoryReader _memory;
     private readonly FishingSettings _settings;
+    private readonly FishingInputController _input;
     private readonly int? _parentProcessId;
     private bool _exitRequested;
 
@@ -27,6 +28,7 @@ internal sealed class FishingController
         _memory = memory;
         _settings = settings;
         _parentProcessId = parentProcessId;
+        _input = new FishingInputController(memory, settings, StopReason);
     }
 
     internal static Mutex AcquireSingleInstance()
@@ -44,7 +46,7 @@ internal sealed class FishingController
         if (window == IntPtr.Zero) throw new InvalidOperationException("Could not resolve the client window.");
         var viewport = ReadValidatedViewport(window);
 
-        Console.WriteLine($"CONTROLLER_READY: viewport={viewport.Width}x{viewport.Height}; start=0x{_settings.StartVirtualKey:X2}; exit=0x{_settings.ExitVirtualKey:X2}.");
+        Console.WriteLine($"CONTROLLER_READY: viewport={viewport.Width}x{viewport.Height}; start=0x{_settings.StartVirtualKey:X2}; exit=0x{_settings.ExitVirtualKey:X2}; backgroundInput={_settings.EnableBackgroundInput}.");
         var startKeyWasDown = IsKeyDown(_settings.StartVirtualKey);
         var focusWasValid = false;
         HashSet<ulong> idleSeen = [];
@@ -145,7 +147,7 @@ internal sealed class FishingController
                 {
                     castNumber++;
                     Console.WriteLine($"CAST {castNumber}: retry cast.");
-                    SendKey((byte)_settings.StartVirtualKey, _settings.KeyHoldMs);
+                    _input.SendKey(window, (byte)_settings.StartVirtualKey, _settings.KeyHoldMs);
                     castClock.Restart();
                     continue;
                 }
@@ -161,28 +163,20 @@ internal sealed class FishingController
                 return;
             }
 
-            var observationDelay = NextDelay(_settings.ObservationDelayMs);
-            if (!WaitInterruptibly(observationDelay, out var waitFailure)) { Stop(waitFailure, catches); return; }
-            var prehoverReady = TryPositionCursorOverBobber(window, viewport, render.ObjectAddress, render.ObjectGuid,
-                cameraManagerAddress, mouseoverAddress, out var prehoverX, out var prehoverY, out var moveMs, out var prehoverFailure);
-            var manualCatch = prehoverFailure == MouseButtonHeldFailure;
-            Console.WriteLine(prehoverReady
-                ? $"CAST {castNumber}: PREHOVER_READY pixel=({prehoverX},{prehoverY}) move={moveMs}ms."
-                : manualCatch
-                    ? $"CAST {castNumber}: PREHOVER_SKIPPED {prehoverFailure}."
-                    : $"CAST {castNumber}: PREHOVER_PENDING {prehoverFailure}.");
+            var manualCatch = false;
 
             var biteClock = Stopwatch.StartNew();
             var bite = WaitForBite(render.ObjectAddress, render.InitialAnimation, out var biteFailure);
             if (biteFailure is not null) { Stop(biteFailure, catches); return; }
 
             var safeForLure = false;
+            string waitFailure;
             if (bite)
             {
                 var reactionDelay = NextDelay(_settings.ReactionDelayMs);
                 Console.WriteLine($"CAST {castNumber}: BITE reaction={reactionDelay}ms castAge={castClock.Elapsed.TotalSeconds:F3}s.");
                 if (!WaitInterruptibly(reactionDelay, out waitFailure)) { Stop(waitFailure, catches); return; }
-                manualCatch |= MouseButtonHeld();
+                manualCatch |= _input.GameMouseButtonHeld;
                 var caught = false;
                 var pixelX = 0;
                 var pixelY = 0;
@@ -217,7 +211,7 @@ internal sealed class FishingController
 
             if (safeForLure && _settings.EnableLureReapplication && !lureDisabledForSession)
             {
-                switch (PrepareLure(player.ObjectAddress, out var lureFailure))
+                switch (PrepareLure(window, player.ObjectAddress, out var lureFailure))
                 {
                     case LurePreparationResult.Interrupted:
                         Stop(lureFailure, catches);
@@ -235,7 +229,7 @@ internal sealed class FishingController
             if (StopReason() is { } castStop) { Stop(castStop, catches); return; }
             castNumber++;
             Console.WriteLine($"CAST {castNumber}: recast after {recastDelay}ms.");
-            SendKey((byte)_settings.StartVirtualKey, _settings.KeyHoldMs);
+            _input.SendKey(window, (byte)_settings.StartVirtualKey, _settings.KeyHoldMs);
             castClock.Restart();
         }
     }
@@ -297,22 +291,35 @@ internal sealed class FishingController
     private bool TryCatchBobber(IntPtr window, ClientViewport viewport, RenderableBobber bobber,
         uint cameraManagerAddress, uint mouseoverAddress, out int pixelX, out int pixelY, out string failure)
     {
-        NativeMethods.GetCursorPos(out var cursor);
+        if (_input.IsBackgroundActive)
+        {
+            if (!TryProjectBobber(viewport, bobber.ObjectAddress, cameraManagerAddress,
+                    out pixelX, out pixelY, out failure)) return false;
+            return _input.TryBackgroundCatch(window, viewport, mouseoverAddress, bobber.ObjectGuid,
+                pixelX, pixelY, out failure);
+        }
+        if (!NativeMethods.GetCursorPos(out var cursor))
+        {
+            pixelX = pixelY = 0;
+            failure = "cursor position unavailable";
+            return false;
+        }
         pixelX = cursor.X - viewport.Origin.X;
         pixelY = cursor.Y - viewport.Origin.Y;
         _memory.TryReadUInt64(mouseoverAddress, out var mouseoverGuid);
         if (mouseoverGuid != bobber.ObjectGuid)
         {
-            if (!TryPositionCursorOverBobber(window, viewport, bobber.ObjectAddress, bobber.ObjectGuid,
-                    cameraManagerAddress, mouseoverAddress, out pixelX, out pixelY, out _, out failure))
+            if (!TryMoveCursorToBobber(window, viewport, bobber.ObjectAddress, cameraManagerAddress,
+                    out pixelX, out pixelY, out failure))
                 return false;
             var settleDelay = NextDelay(_settings.CursorToClickDelayMs);
             if (!WaitInterruptibly(settleDelay, out failure)) return false;
         }
-        return TryRightClickVerifiedBobber(window, viewport, mouseoverAddress, bobber.ObjectGuid, out failure);
+        return _input.TryFocusedCatch(window, viewport, mouseoverAddress, bobber.ObjectGuid,
+            pixelX, pixelY, out failure);
     }
 
-    private LurePreparationResult PrepareLure(uint playerAddress, out string failure)
+    private LurePreparationResult PrepareLure(IntPtr window, uint playerAddress, out string failure)
     {
         failure = string.Empty;
         var lure = TryReadLure(playerAddress);
@@ -328,17 +335,8 @@ internal sealed class FishingController
 
         var preDelay = NextDelay(_settings.LurePreApplyDelayMs);
         if (!WaitInterruptibly(preDelay, out failure)) return LurePreparationResult.Interrupted;
-        NativeMethods.keybd_event((byte)_settings.LureModifierVirtualKey, 0, 0, UIntPtr.Zero);
-        try
-        {
-            Thread.Sleep(50);
-            SendKey((byte)_settings.StartVirtualKey, _settings.KeyHoldMs);
-            Thread.Sleep(50);
-        }
-        finally
-        {
-            NativeMethods.keybd_event((byte)_settings.LureModifierVirtualKey, 0, NativeMethods.KeyUp, UIntPtr.Zero);
-        }
+        _input.SendModifiedKey(window, (byte)_settings.LureModifierVirtualKey,
+            (byte)_settings.StartVirtualKey, _settings.KeyHoldMs);
 
         var castStartClock = Stopwatch.StartNew();
         uint castingSpellId = 0;
@@ -406,12 +404,22 @@ internal sealed class FishingController
         return new FishingLureState(item.Entry, enchantId, durationMs);
     }
 
-    private bool TryPositionCursorOverBobber(IntPtr window, ClientViewport viewport, uint objectAddress, ulong bobberGuid,
-        uint cameraManagerAddress, uint mouseoverAddress, out int clientX, out int clientY, out int movementMs, out string failure)
+    private bool TryMoveCursorToBobber(IntPtr window, ClientViewport viewport, uint objectAddress,
+        uint cameraManagerAddress, out int clientX, out int clientY, out string failure)
     {
-        clientX = clientY = movementMs = 0;
+        clientX = clientY = 0;
         failure = string.Empty;
-        if (MouseButtonHeld()) { failure = MouseButtonHeldFailure; return false; }
+        if (_input.GameMouseButtonHeld) { failure = MouseButtonHeldFailure; return false; }
+        if (!TryProjectBobber(viewport, objectAddress, cameraManagerAddress, out clientX, out clientY, out failure))
+            return false;
+        return MoveCursorInterpolated(window, viewport, clientX, clientY, out _, out failure);
+    }
+
+    private bool TryProjectBobber(ClientViewport viewport, uint objectAddress, uint cameraManagerAddress,
+        out int clientX, out int clientY, out string failure)
+    {
+        clientX = clientY = 0;
+        failure = string.Empty;
         if (!_memory.TryReadSingle(objectAddress + ClientOffsets.BobberWorldY, out var worldY) ||
             !_memory.TryReadSingle(objectAddress + ClientOffsets.BobberWorldX, out var worldX) ||
             !_memory.TryReadSingle(objectAddress + ClientOffsets.BobberWorldZ, out var worldZ))
@@ -448,31 +456,21 @@ internal sealed class FishingController
             failure = $"projection pixel=({clientX},{clientY}) depth={projection.Depth:F3}";
             return false;
         }
-        if (!MoveCursorInterpolated(window, viewport, viewport.Origin.X + clientX, viewport.Origin.Y + clientY, out movementMs, out failure))
-            return false;
-
-        var settle = Stopwatch.StartNew();
-        ulong mouseoverGuid = 0;
-        while (settle.ElapsedMilliseconds < 180)
-        {
-            if (StopReason() is { } stop) { failure = stop; return false; }
-            if (MouseButtonHeld()) { failure = MouseButtonHeldFailure; return false; }
-            _memory.TryReadUInt64(mouseoverAddress, out mouseoverGuid);
-            if (mouseoverGuid == bobberGuid) return true;
-            Thread.Sleep(10);
-        }
-        failure = $"pixel=({clientX},{clientY}) mouseover=0x{mouseoverGuid:X16}";
-        return false;
+        return true;
     }
 
-    private bool MoveCursorInterpolated(IntPtr window, ClientViewport viewport, int targetX, int targetY,
+    private bool MoveCursorInterpolated(IntPtr window, ClientViewport viewport, int targetClientX, int targetClientY,
         out int durationMs, out string failure)
     {
         durationMs = 0;
         failure = string.Empty;
         if (!NativeMethods.GetCursorPos(out var start)) { failure = "cursor position unavailable"; return false; }
-        var deltaX = targetX - start.X;
-        var deltaY = targetY - start.Y;
+        var targetX = viewport.Origin.X + targetClientX;
+        var targetY = viewport.Origin.Y + targetClientY;
+        var startX = start.X;
+        var startY = start.Y;
+        var deltaX = targetX - startX;
+        var deltaY = targetY - startY;
         var distance = Math.Sqrt(deltaX * (double)deltaX + deltaY * (double)deltaY);
         durationMs = Math.Clamp((int)Math.Round(155 + distance * 0.32) + Random.Shared.Next(-20, 21),
             _settings.CursorMoveDurationMs.Min, _settings.CursorMoveDurationMs.Max);
@@ -480,39 +478,23 @@ internal sealed class FishingController
         while (clock.ElapsedMilliseconds < durationMs)
         {
             if (StopReason() is { } stop) { failure = stop; return false; }
-            if (MouseButtonHeld()) { failure = MouseButtonHeldFailure; return false; }
-            if (!IsViewportCurrent(window, viewport)) { failure = "client viewport changed"; return false; }
+            if (_input.GameMouseButtonHeld) { failure = MouseButtonHeldFailure; return false; }
+            if (!viewport.IsCurrent(window)) { failure = "client viewport changed"; return false; }
             var t = Math.Clamp(clock.Elapsed.TotalMilliseconds / durationMs, 0, 1);
             var eased = t * t * (3 - 2 * t);
-            if (!NativeMethods.SetCursorPos(start.X + (int)Math.Round(deltaX * eased), start.Y + (int)Math.Round(deltaY * eased)))
+            var nextX = startX + (int)Math.Round(deltaX * eased);
+            var nextY = startY + (int)Math.Round(deltaY * eased);
+            if (!NativeMethods.SetCursorPos(nextX, nextY))
             {
                 failure = "SetCursorPos failed";
                 return false;
             }
             Thread.Sleep(8);
         }
-        if (MouseButtonHeld()) { failure = MouseButtonHeldFailure; return false; }
+        if (_input.GameMouseButtonHeld) { failure = MouseButtonHeldFailure; return false; }
         if (NativeMethods.SetCursorPos(targetX, targetY)) return true;
         failure = "final SetCursorPos failed";
         return false;
-    }
-
-    private bool TryRightClickVerifiedBobber(IntPtr window, ClientViewport viewport, uint mouseoverAddress,
-        ulong expectedGuid, out string failure)
-    {
-        failure = StopReason() ?? string.Empty;
-        if (failure.Length != 0) return false;
-        if (MouseButtonHeld()) { failure = MouseButtonHeldFailure; return false; }
-        if (!IsViewportCurrent(window, viewport)) { failure = "client viewport changed"; return false; }
-        if (!_memory.TryReadUInt64(mouseoverAddress, out var guid) || guid != expectedGuid)
-        {
-            failure = $"mouseover=0x{guid:X16}; expected=0x{expectedGuid:X16}";
-            return false;
-        }
-        NativeMethods.mouse_event(NativeMethods.RightButtonDown, 0, 0, 0, UIntPtr.Zero);
-        try { Thread.Sleep(_settings.MouseButtonHoldMs); }
-        finally { NativeMethods.mouse_event(NativeMethods.RightButtonUp, 0, 0, 0, UIntPtr.Zero); }
-        return true;
     }
 
     private bool WaitForBobberRemoval(ulong playerGuid, ulong bobberGuid, out string failure)
@@ -575,8 +557,9 @@ internal sealed class FishingController
         if (!IsParentProcessAlive()) return "launcher closed";
         if (!_memory.IsProcessAlive) return "client process closed";
         if (IsExitPressed()) { _exitRequested = true; return "exit key pressed"; }
-        if (!NativeMethods.IsProcessForeground(_memory.Info.ProcessId)) return "client lost foreground focus";
-        var movement = PressedMovementKey();
+        var foreground = NativeMethods.IsProcessForeground(_memory.Info.ProcessId);
+        if (!foreground && !_settings.EnableBackgroundInput) return "client lost foreground focus";
+        var movement = foreground ? PressedMovementKey() : null;
         return movement is null ? null : $"movement key {movement} pressed";
     }
 
@@ -598,20 +581,12 @@ internal sealed class FishingController
     private int NextDelay(DelayRange range) => Random.Shared.Next(range.Min, checked(range.Max + 1));
     private bool IsExitPressed() => IsKeyDown(_settings.ExitVirtualKey);
     private static bool IsKeyDown(int key) => (NativeMethods.GetAsyncKeyState(key) & 0x8000) != 0;
-    private static bool MouseButtonHeld() => IsKeyDown(0x01) || IsKeyDown(0x02);
 
     private static string? PressedMovementKey()
     {
         foreach (var (key, name) in MovementKeys)
             if (IsKeyDown(key)) return name;
         return null;
-    }
-
-    private static void SendKey(byte virtualKey, int holdMs)
-    {
-        NativeMethods.keybd_event(virtualKey, 0, 0, UIntPtr.Zero);
-        try { Thread.Sleep(holdMs); }
-        finally { NativeMethods.keybd_event(virtualKey, 0, NativeMethods.KeyUp, UIntPtr.Zero); }
     }
 
     private ClientViewport ReadValidatedViewport(IntPtr window)
@@ -630,15 +605,6 @@ internal sealed class FishingController
         return new ClientViewport(origin, width, height);
     }
 
-    private static bool IsViewportCurrent(IntPtr window, ClientViewport expected)
-    {
-        if (!NativeMethods.GetClientRect(window, out var rect)) return false;
-        var origin = new Point();
-        return NativeMethods.ClientToScreen(window, ref origin) &&
-               origin.X == expected.Origin.X && origin.Y == expected.Origin.Y &&
-               rect.Right - rect.Left == expected.Width && rect.Bottom - rect.Top == expected.Height;
-    }
-
     private void SignalState(bool on)
     {
         if (!_settings.EnableStateSounds) return;
@@ -647,7 +613,17 @@ internal sealed class FishingController
     }
 }
 
-internal sealed record ClientViewport(Point Origin, int Width, int Height);
+internal sealed record ClientViewport(Point Origin, int Width, int Height)
+{
+    internal bool IsCurrent(IntPtr window)
+    {
+        if (!NativeMethods.GetClientRect(window, out var rect)) return false;
+        var origin = new Point();
+        return NativeMethods.ClientToScreen(window, ref origin) &&
+               origin.X == Origin.X && origin.Y == Origin.Y &&
+               rect.Right - rect.Left == Width && rect.Bottom - rect.Top == Height;
+    }
+}
 internal sealed record RenderableBobber(uint ObjectAddress, ulong ObjectGuid, uint InitialAnimation);
 internal sealed record FishingLureState(uint ItemEntry, uint EnchantId, uint DurationMs);
 internal sealed record ScreenProjection(double X, double Y, double Depth);

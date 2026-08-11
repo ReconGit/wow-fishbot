@@ -16,6 +16,13 @@ internal static class NativeMethods
     internal const uint KeyUp = 0x0002;
     internal const uint RightButtonDown = 0x0008;
     internal const uint RightButtonUp = 0x0010;
+    internal const uint WindowKeyDown = 0x0100;
+    internal const uint WindowKeyUp = 0x0101;
+    internal const uint WindowMouseMove = 0x0200;
+    internal const uint WindowRightButtonDown = 0x0204;
+    internal const uint WindowRightButtonUp = 0x0205;
+    internal const int MouseKeyRightButton = 0x0002;
+    internal const uint SendMessageAbortIfHung = 0x0002;
     internal const uint StillActive = 259;
 
     internal static void EnableDebugPrivilege()
@@ -62,10 +69,16 @@ internal static class NativeMethods
     [DllImport("user32.dll")][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool ClientToScreen(IntPtr window, ref Point point);
     [DllImport("user32.dll")][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GetCursorPos(out Point point);
+    [DllImport("user32.dll")][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GetClipCursor(out Rect rect);
+    [DllImport("user32.dll", EntryPoint = "ClipCursor")][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool SetCursorClip(ref Rect rect);
+    [DllImport("user32.dll", EntryPoint = "ClipCursor")][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool ReleaseCursorClip(IntPtr rect);
     [DllImport("user32.dll")] internal static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
     [DllImport("user32.dll")] internal static extern short GetAsyncKeyState(int virtualKey);
     [DllImport("user32.dll")][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool MessageBeep(uint type);
     [DllImport("user32.dll")] internal static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+    [DllImport("user32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", SetLastError = true)] internal static extern IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr wParam, IntPtr lParam, uint flags, uint timeoutMs, out IntPtr result);
+    [DllImport("user32.dll")] internal static extern uint MapVirtualKey(uint code, uint mapType);
 }
 
 [StructLayout(LayoutKind.Sequential)] internal struct Point { internal int X; internal int Y; }

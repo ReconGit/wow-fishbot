@@ -12,7 +12,6 @@ internal sealed class FishingSettings
     public DelayRange RetryDelayMs { get; init; } = new(150, 200);
     public DelayRange RecastDelayMs { get; init; } = new(150, 200);
     public DelayRange ReactionDelayMs { get; init; } = new(200, 350);
-    public DelayRange ObservationDelayMs { get; init; } = new(150, 200);
     public DelayRange CursorToClickDelayMs { get; init; } = new(200, 320);
     public DelayRange CursorMoveDurationMs { get; init; } = new(180, 420);
     public int BobberResolveTimeoutMs { get; init; } = 1000;
@@ -29,6 +28,7 @@ internal sealed class FishingSettings
     public DelayRange LurePreApplyDelayMs { get; init; } = new(150, 200);
     public DelayRange LurePostApplyDelayMs { get; init; } = new(150, 200);
     public bool EnableStateSounds { get; init; } = true;
+    public bool EnableBackgroundInput { get; init; }
     public bool EnableFileLogging { get; init; }
     public int LogMaxBytes { get; init; } = 2 * 1024 * 1024;
     public int LogArchiveCount { get; init; } = 3;
@@ -56,7 +56,6 @@ internal sealed class FishingSettings
         ValidateRange(RetryDelayMs, nameof(RetryDelayMs), path);
         ValidateRange(RecastDelayMs, nameof(RecastDelayMs), path);
         ValidateRange(ReactionDelayMs, nameof(ReactionDelayMs), path);
-        ValidateRange(ObservationDelayMs, nameof(ObservationDelayMs), path);
         ValidateRange(CursorToClickDelayMs, nameof(CursorToClickDelayMs), path);
         ValidateRange(CursorMoveDurationMs, nameof(CursorMoveDurationMs), path);
         ValidateRange(LurePreApplyDelayMs, nameof(LurePreApplyDelayMs), path);
